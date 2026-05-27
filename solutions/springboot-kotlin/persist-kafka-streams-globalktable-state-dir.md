@@ -39,6 +39,13 @@ of the local state path and changing it creates a fresh Streams application.
 Use `spring.kafka.streams.properties.auto.offset.reset: earliest` only as the
 cold-start fallback when no local checkpoint exists.
 
+When the container runs as a non-root UID, avoid mounting the persistent volume
+directly at the exact `state-dir` path. Kafka Streams sets POSIX permissions on
+`state.dir` during startup, and a PVC mount root is often owned by root even when
+`fsGroup` grants group write access. Prefer mounting the volume at a parent path
+and configuring `state-dir` as a child directory created by the application UID,
+or prepare the mounted directory with an init container that owns/chmods it.
+
 ## Reusable Insight
 For `GlobalKTable`, Kafka Streams stores replicated table state under
 `state.dir/<application-id>/global` and writes checkpoint offsets for recovery.
@@ -50,7 +57,10 @@ is missing, the global table must bootstrap from the source topic again.
 Look for profile or base YAML that lacks `spring.kafka.streams.state-dir`, uses
 the default `/tmp/kafka-streams`, or enables cleanup on startup/shutdown. In
 Kubernetes, inspect whether the configured path is backed by an `emptyDir` or
-image filesystem rather than a persistent volume.
+image filesystem rather than a persistent volume. Also compare the Deployment
+`volumeMounts[].mountPath` with `spring.kafka.streams.state-dir`: if they are
+the same path and the pod runs as non-root, Kafka Streams can fail with
+`StateDirectory` permission errors while changing directory permissions.
 
 ## Verification
 Add configuration tests that bind `spring.kafka` and assert:
