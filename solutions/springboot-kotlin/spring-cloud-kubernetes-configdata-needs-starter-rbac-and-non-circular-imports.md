@@ -41,6 +41,10 @@ or put only a ConfigMap name/reference in values and pass it to
 same namespace as the Pod. Treat Kubernetes namespace and Vault path or Vault
 Kubernetes role as separate configuration axes; do not infer one from the other
 just because they contain environment-like names.
+Keep `spring.config.import: kubernetes:` in the same early profile document
+that defines `spring.cloud.kubernetes.config.sources`; putting the import in an
+environment profile while the source list lives in a separate Kubernetes
+profile can make the import resolve before the intended source list is bound.
 
 ## Reusable Insight
 Spring Cloud Kubernetes ConfigData has three independent requirements:
@@ -59,6 +63,11 @@ manifest. Also compare the rendered Helm namespace, external ConfigMap
 `metadata.namespace`, and packaged `spring.cloud.kubernetes.config.namespace`
 default; they should agree with the Pod namespace, independently of Vault
 secret paths or Vault role names.
+Also check indexed environment overrides for list properties. A lone
+`SPRING_CLOUD_KUBERNETES_CONFIG_SOURCES_0_NAMESPACE` can replace the
+profile-owned `spring.cloud.kubernetes.config.sources` list and silently drop
+additional ConfigMaps. Either avoid source-index env overrides or provide a
+complete indexed list with every source name and namespace.
 
 ## Verification
 Run `helm lint` and `helm template` with the exact chart and values. In the
@@ -72,3 +81,9 @@ profile or rendered Deployment points at the expected ConfigMap name.
 Render Helm with the actual namespace flag, such as `helm template ... -n
 <namespace>`, and assert all namespaced Kubernetes objects render into that
 namespace.
+When indexed `SPRING_CLOUD_KUBERNETES_CONFIG_SOURCES_*` variables appear in the
+Deployment, assert that every expected source has both `_NAME` and `_NAMESPACE`
+entries.
+For packaged profile ownership, inspect the built image or classpath resources
+and confirm the Kubernetes profile contains both the `kubernetes:` import and
+the expected source names before rebuilding the application image.
