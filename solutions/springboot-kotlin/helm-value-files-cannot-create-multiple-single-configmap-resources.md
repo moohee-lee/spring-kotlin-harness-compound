@@ -30,10 +30,21 @@ For value-repository raw manifests, point a separate ArgoCD source at the
 manifest directory and set `directory.recurse: true` when nested directories
 such as `configmaps/order/*.yaml` should be included.
 
+When ConfigMap changes must trigger a Helm checksum rollout, the ConfigMaps
+must be rendered by the same Helm source as the Deployment. Keep separated
+files in the values repository by making each file a Helm value file under a
+multi-ConfigMap surface such as `.Values.configMaps.<name>.files`, include
+those files in ArgoCD `helm.valueFiles`, and remove the raw manifest source for
+the same ConfigMaps. Hash the ConfigMap template output from the Deployment pod
+template annotation, so any rendered ConfigMap data change mutates
+`spec.template.metadata.annotations`.
+
 ## Reusable Insight
 Helm value files configure chart templates; they do not create additional
 resource instances unless the chart has a template loop or separate value
-surface for those instances.
+surface for those instances. A checksum annotation only rolls pods when the
+hashed template is part of the Helm render that also produces the Deployment;
+raw ConfigMap sources applied separately by ArgoCD are invisible to that hash.
 
 ## Detection
 Compare `spring.cloud.kubernetes.config.sources[*].name` with the rendered
@@ -50,3 +61,7 @@ the rendered `kind: ConfigMap` objects and confirm each expected
 placeholder resolution or RBAC. For external raw manifests, parse or dry-run
 the manifest directory separately and verify the ArgoCD Application includes
 that directory as a standalone source.
+
+For checksum rollout, assert the rendered Deployment contains a
+`checksum/configmap` annotation, then render once with a harmless ConfigMap data
+change and confirm the checksum changes.
