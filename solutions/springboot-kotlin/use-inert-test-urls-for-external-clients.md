@@ -1,32 +1,35 @@
 ---
-title: Use inert test URLs for external clients
+title: 외부 client test URL은 inert local URL을 사용한다
 tags: [springboot-kotlin, configuration, testing, http-client]
 scope: cross-project
-status: draft
+status: active
+principles: [configuration-ownership, testing-contracts]
 ---
 
-# Use inert test URLs for external clients
+# 외부 client test URL은 inert local URL을 사용한다
 
-## Context
+> 관련 공통 원칙: [설정 소유권과 로딩 시점](../../principles/ko/configuration-ownership.md), [테스트는 계약을 검증해야 한다](../../principles/ko/testing-contracts.md)
 
-Spring Boot services often configure Feign, WebClient, RestClient, Kafka schema registry, or other external adapter endpoints through profile YAML. Production-like profiles may need real internal URLs, while the test profile only needs enough configuration for context startup and focused unit tests.
+## 적용 시점
 
-## Wrong Direction
+Spring Boot service가 Feign, WebClient, RestClient, Kafka schema registry 등 외부 adapter endpoint를 profile YAML로 설정할 때 적용한다. production-like profile은 실제 내부 URL이 필요할 수 있지만 test profile은 context startup과 focused unit test를 만족할 만큼의 설정만 필요하다.
 
-Copying a realistic dev, stage, or test environment hostname into `application-test.yaml` makes accidental integration calls look legitimate. A future context test, smoke test, or mistakenly wired client can reach an internal service instead of failing fast inside the local test process.
+## 피해야 할 방향
 
-## Correct Pattern
+`application-test.yaml`에 현실적인 dev, stage, test environment hostname을 복사하면 안 된다. future context test, smoke test, 잘못 wiring된 client가 local test process 안에서 실패하지 않고 내부 service를 호출할 수 있다.
 
-Keep real external endpoints in the owning runtime profile, such as `application-dev.yaml` or deployment-managed configuration. In `application-test.yaml`, use an inert local URL such as `http://localhost` unless the test explicitly starts a local stub server and points the property at that server.
+## 권장 패턴
 
-## Reusable Insight
+실제 외부 endpoint는 `application-dev.yaml`이나 deployment-managed configuration 같은 owning runtime profile에 둔다. `application-test.yaml`에는 test가 local stub server를 직접 띄우고 해당 property를 그 server로 지정하는 경우를 제외하고 `http://localhost` 같은 inert local URL을 사용한다.
 
-Test configuration should satisfy binding and bean creation without implying access to real infrastructure. A local placeholder URL makes accidental calls noisy and contained, while still preserving the same property path that production code binds.
+## 공통 원칙
 
-## Detection
+Test configuration은 binding과 bean creation을 만족해야 하지만 실제 infrastructure 접근을 암시하면 안 된다. local placeholder URL은 accidental call을 시끄럽고 제한된 방식으로 실패하게 만들면서 production code가 bind하는 property path는 보존한다.
 
-Search test resources for hostnames that look like real shared environments, such as `dev`, `stage`, `internal`, cloud domains, or service-discovery names. If a test profile uses one, ask whether any test intentionally calls that endpoint; if not, replace it with an inert local URL.
+## 점검 방법
 
-## Verification
+test resource에서 `dev`, `stage`, `internal`, cloud domain, service-discovery name처럼 실제 shared environment처럼 보이는 hostname을 검색한다. test profile에 그런 값이 있으면 어떤 test가 의도적으로 그 endpoint를 호출하는지 확인하고, 아니라면 inert local URL로 바꾼다.
 
-Add configuration tests that load base and profile YAML separately. Assert that real endpoint values live only in runtime profiles, and that the test profile uses a local or stub-owned endpoint. Run the full Spring context tests to prove the placeholder still satisfies bean creation.
+## 검증 방법
+
+base와 profile YAML을 분리해서 load하는 configuration test를 둔다. real endpoint 값은 runtime profile에만 있고 test profile은 local 또는 stub-owned endpoint를 쓰는지 assert한다. full Spring context test를 실행해 placeholder가 bean creation을 여전히 만족하는지도 확인한다.

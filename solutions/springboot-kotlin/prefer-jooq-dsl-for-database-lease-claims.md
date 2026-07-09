@@ -1,27 +1,26 @@
 ---
-title: Prefer jOOQ DSL for database lease claims
+title: DB lease claim에는 가능하면 jOOQ DSL을 사용한다
 tags: [springboot-kotlin, jooq, persistence, locking]
 scope: cross-project
-status: draft
+status: active
+principles: [persistence-transactions]
 ---
 
-# Prefer jOOQ DSL for database lease claims
+# DB lease claim에는 가능하면 jOOQ DSL을 사용한다
 
-## Context
-Use this when a Spring Boot Kotlin persistence adapter claims due work from a
-database table with row-level locking, lease tokens, bounded batch size, and a
-status transition, especially on PostgreSQL with jOOQ generated table
-references.
+> 관련 공통 원칙: [영속성, 트랜잭션, 동시성 경계](../../principles/ko/persistence-transactions.md)
 
-## Wrong Direction
-Do not keep a plain SQL string just because the query uses
-`FOR UPDATE SKIP LOCKED`, `UPDATE`, or `RETURNING`. Raw SQL duplicates table and
-column names that already exist in generated jOOQ references, hides drift until
-runtime, and often requires manual bind casts that the type-safe DSL can avoid.
+## 적용 시점
 
-## Correct Pattern
-First check whether the project jOOQ version exposes the needed lock and
-returning APIs. For a simple claim, use generated references end to end:
+Spring Boot Kotlin persistence adapter가 database table에서 due work를 claim하고, row-level locking, lease token, bounded batch size, status transition을 함께 다룰 때 적용한다. PostgreSQL과 jOOQ generated table reference를 쓰는 경우가 대표적이다.
+
+## 피해야 할 방향
+
+`FOR UPDATE SKIP LOCKED`, `UPDATE`, `RETURNING`이 들어간다는 이유만으로 plain SQL string을 유지하면 안 된다. raw SQL은 generated jOOQ reference에 이미 있는 table/column name을 다시 쓰게 만들고, drift를 runtime까지 숨기며, type-safe DSL이 피할 수 있는 manual bind cast를 요구하는 경우가 많다.
+
+## 권장 패턴
+
+먼저 project jOOQ version이 필요한 lock/returning API를 제공하는지 확인한다. 단순 claim은 generated reference로 끝까지 표현한다.
 
 ```kotlin
 dsl.update(JOB)
@@ -45,23 +44,16 @@ dsl.update(JOB)
     .fetch()
 ```
 
-Keep the operation inside the existing transaction boundary and map returned
-generated records back to domain models at the adapter boundary.
+operation은 기존 transaction boundary 안에 두고 returned generated record를 adapter boundary에서 domain model로 mapping한다.
 
-## Reusable Insight
-Many PostgreSQL lease-claim queries can be expressed as
-`UPDATE ... WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED) RETURNING ...` with
-jOOQ DSL. This preserves atomic claim behavior while keeping schema references
-typed and reviewable.
+## 공통 원칙
 
-## Detection
-Search persistence adapters for `dsl.fetch("""`, `WITH picked`, table names in
-raw strings, or `RETURNING <alias>.*` in claim methods. Before accepting raw SQL,
-verify that jOOQ lacks a required construct rather than assuming DSL cannot
-represent the query.
+많은 PostgreSQL lease-claim query는 `UPDATE ... WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED) RETURNING ...` 형태로 jOOQ DSL로 표현할 수 있다. atomic claim behavior를 유지하면서 schema reference를 typed/reviewable하게 보존한다.
 
-## Verification
-Add a focused test or code review check proving the claim method uses jOOQ DSL
-lock APIs such as `forUpdate()`, `skipLocked()`, and `returning()`. Run compile,
-static analysis, and a PostgreSQL/Testcontainers concurrency test when Docker is
-available to prove workers still claim each due row at most once.
+## 점검 방법
+
+persistence adapter에서 `dsl.fetch("""`, `WITH picked`, raw string 안 table name, `RETURNING <alias>.*`를 검색한다. raw SQL을 받아들이기 전에 jOOQ가 필요한 construct를 정말 제공하지 않는지 확인한다.
+
+## 검증 방법
+
+claim method가 `forUpdate()`, `skipLocked()`, `returning()` 같은 jOOQ DSL lock API를 쓰는지 focused test나 code review check로 확인한다. Docker가 가능하면 compile, static analysis, PostgreSQL/Testcontainers concurrency test로 여러 worker가 due row를 중복 claim하지 않는지 검증한다.

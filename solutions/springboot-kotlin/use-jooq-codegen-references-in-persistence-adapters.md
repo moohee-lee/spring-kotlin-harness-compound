@@ -1,39 +1,46 @@
 ---
-title: Use jOOQ codegen references in persistence adapters
+title: jOOQ persistence adapter는 codegen reference를 사용한다
 tags: [springboot-kotlin, jooq, codegen, persistence]
 scope: cross-project
 status: active
+principles: [persistence-transactions]
 ---
 
-# Use jOOQ codegen references in persistence adapters
+# jOOQ persistence adapter는 codegen reference를 사용한다
 
-## Context
+> 관련 공통 원칙: [영속성, 트랜잭션, 동시성 경계](../../principles/ko/persistence-transactions.md)
 
-Use this when a Spring Boot Kotlin persistence adapter writes jOOQ queries against tables that are already available through generated `tables.references` classes.
+## 적용 시점
 
-## Wrong Direction
+Spring Boot Kotlin persistence adapter가 이미 generated `tables.references` class로 제공되는 table에 대해 jOOQ query를 작성할 때 적용한다.
 
-Do not duplicate schema knowledge with `DSL.table(DSL.name(...))`, `DSL.field(DSL.name(...))`, string column names, or `record.get("column", Type::class.java)` in normal adapters. That hides table/column drift until runtime and makes aliases, nullability, and selected field mapping harder to review.
+## 피해야 할 방향
 
-## Correct Pattern
+일반 adapter에서 `DSL.table(DSL.name(...))`, `DSL.field(DSL.name(...))`, string column name, `record.get("column", Type::class.java)`로 schema 지식을 중복하면 안 된다. 이런 코드는 table/column drift를 runtime까지 숨기고 alias, nullability, selected field mapping을 review하기 어렵게 만든다.
 
-Import generated table references from `com.<project>.jooq.generated.tables.references`, alias generated table instances when SQL aliases are needed, and select/read generated `Field` objects end to end:
+## 권장 패턴
 
-- `select(TABLE.COLUMN)` instead of `select(DSL.field(...))`
-- `from(TABLE)` instead of `from(DSL.table(...))`
-- Alias generated tables only when the SQL actually needs it, such as self-joins, joining the same table twice, or disambiguating an unavoidable naming conflict. Simple one-use joins should import the generated references directly without Kotlin import aliases or jOOQ table aliases.
-- `record.get(TABLE.COLUMN)` or helper methods that accept `Field<T>` instead of string names
+`com.<project>.jooq.generated.tables.references`의 generated table reference를 import한다. SQL alias가 필요하면 generated table instance를 alias한다. select/read는 generated `Field` object로 끝까지 유지한다.
 
-If generated sources are written under `build/` and main code imports them, clean builds need an explicit generation path such as `compileKotlin` and analysis tasks depending on `jooqCodegen`. For Testcontainers-backed codegen, check the existing bootRun/Docker tradeoff before wiring that dependency globally.
+- `select(TABLE.COLUMN)`을 사용하고 `select(DSL.field(...))`를 피한다.
+- `from(TABLE)`을 사용하고 `from(DSL.table(...))`를 피한다.
+- self-join, 같은 table 두 번 join, 불가피한 naming conflict처럼 SQL상 alias가 필요한 경우에만 generated table을 alias한다. 단순 one-use join은 Kotlin import alias나 jOOQ table alias 없이 generated reference를 직접 import한다.
+- `record.get(TABLE.COLUMN)` 또는 `Field<T>`를 받는 helper를 사용하고 string name을 피한다.
 
-## Reusable Insight
+generated source가 `build/` 아래 만들어지고 main code가 import한다면 clean build에는 `compileKotlin`과 analysis task가 `jooqCodegen`을 거치는 명시적 generation path가 필요할 수 있다. Testcontainers-backed codegen이면 bootRun/Docker tradeoff를 확인한 뒤 global wiring 여부를 결정한다.
 
-jOOQ codegen is most useful when adapters treat generated references as the schema contract. Mixing generated schema and ad hoc string DSL creates two sources of truth.
+## 공통 원칙
 
-## Detection
+jOOQ codegen의 가치는 adapter가 generated reference를 schema contract로 취급할 때 가장 크다. generated schema와 ad hoc string DSL을 섞으면 source of truth가 둘로 갈라진다.
 
-Search persistence adapters for `DSL.table`, `DSL.field`, `DSL.name`, `record.get("...")`, or duplicated table/column constants. Tests can assert schema-qualified generated table names in rendered SQL to make accidental raw table usage visible.
+## 점검 방법
 
-## Verification
+persistence adapter에서 `DSL.table`, `DSL.field`, `DSL.name`, `record.get("...")`, duplicated table/column constant를 검색한다. rendered SQL의 schema-qualified generated table name을 assert하는 test로 accidental raw table usage를 드러낼 수도 있다.
 
-Run `./gradlew clean test --tests '*<AdapterTest>'` to prove generated sources are available after clean, then run the project's normal static analysis and test command. For Testcontainers-backed codegen, also run `./gradlew bootRun --dry-run` and deliberately accept or redesign any `:jooqCodegen` dependency in the app startup path.
+## 검증 방법
+
+```bash
+./gradlew clean test --tests '*<AdapterTest>'
+```
+
+clean 이후 generated source가 사용 가능한지 확인한 뒤 project의 static analysis와 normal test command를 실행한다. Testcontainers-backed codegen이면 `./gradlew bootRun --dry-run`도 실행해 app startup path에 `:jooqCodegen` dependency를 받아들일지, redesign할지 명시적으로 결정한다.

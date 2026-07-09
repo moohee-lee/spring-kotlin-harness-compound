@@ -1,51 +1,38 @@
 ---
-title: Verify Spring Boot Kafka dotted client properties with Binder
+title: Spring Boot Kafka dotted client property는 Binder로 검증한다
 tags: [springboot-kotlin, kafka, configuration, binder]
 scope: cross-project
 status: active
+principles: [configuration-ownership, kafka-streams-operations]
 ---
 
-# Verify Spring Boot Kafka dotted client properties with Binder
+# Spring Boot Kafka dotted client property는 Binder로 검증한다
 
-## Context
+> 관련 공통 원칙: [설정 소유권과 로딩 시점](../../principles/ko/configuration-ownership.md), [Kafka Streams 운영 계약](../../principles/ko/kafka-streams-operations.md)
 
-Spring Boot Kafka configuration often stores raw Kafka client properties under
-`spring.kafka.properties`, `spring.kafka.producer.properties`, and
-`spring.kafka.streams.properties`. Kafka Streams also supports dotted client
-prefixes such as `main.consumer.sasl.jaas.config`,
-`global.consumer.sasl.jaas.config`, `producer.sasl.jaas.config`, and
-`admin.sasl.jaas.config`.
+## 적용 시점
 
-## Wrong Direction
+Spring Boot Kafka configuration이 raw Kafka client property를 `spring.kafka.properties`, `spring.kafka.producer.properties`, `spring.kafka.streams.properties` 아래에 저장할 때 적용한다. Kafka Streams는 `main.consumer.sasl.jaas.config`, `global.consumer.sasl.jaas.config`, `producer.sasl.jaas.config`, `admin.sasl.jaas.config` 같은 dotted client prefix도 지원한다.
 
-Only checking the YAML text or a flattened `YamlPropertySourceLoader` key can
-miss binder-level issues. A dotted key may appear in the file but still fail to
-bind to the `KafkaProperties` map in the shape Spring Boot uses at runtime.
+## 피해야 할 방향
 
-## Correct Pattern
+YAML text나 flattened `YamlPropertySourceLoader` key만 확인하면 binder-level issue를 놓칠 수 있다. dotted key가 file에 보여도 runtime에서 Spring Boot가 사용하는 `KafkaProperties` map shape로 bind되지 않을 수 있다.
 
-For Spring Boot 4, bind the loaded environment to
-`org.springframework.boot.kafka.autoconfigure.KafkaProperties` and assert the
-resulting maps contain the exact Kafka client keys. In Spring Boot 4 the package
-is `org.springframework.boot.kafka.autoconfigure`, not the older
-`org.springframework.boot.autoconfigure.kafka` package.
+## 권장 패턴
 
-## Reusable Insight
+Spring Boot 4에서는 loaded environment를 `org.springframework.boot.kafka.autoconfigure.KafkaProperties`로 bind하고 resulting map에 정확한 Kafka client key가 들어 있는지 assert한다. Spring Boot 4 package는 예전 `org.springframework.boot.autoconfigure.kafka`가 아니라 `org.springframework.boot.kafka.autoconfigure`다.
 
-Dotted Kafka client property keys are safest when tests verify both:
+## 공통 원칙
 
-- the config file contains the intended keys and defaults
-- `Binder.get(environment).bind("spring.kafka", KafkaProperties::class.java)`
-  produces maps with keys such as `security.protocol`,
-  `main.consumer.sasl.jaas.config`, and `producer.sasl.jaas.config`
+Dotted Kafka client property key는 두 층을 모두 검증할 때 안전하다.
 
-## Detection
+- config file에 intended key와 default가 있다.
+- `Binder.get(environment).bind("spring.kafka", KafkaProperties::class.java)` 결과 map에 `security.protocol`, `main.consumer.sasl.jaas.config`, `producer.sasl.jaas.config` 같은 key가 있다.
 
-Use this pattern when adding SCRAM/SASL, per-client Kafka Streams credentials,
-or any Kafka property whose key itself contains dots.
+## 점검 방법
 
-## Verification
+SCRAM/SASL, per-client Kafka Streams credential, key 자체에 dot이 들어가는 Kafka property를 추가할 때 이 pattern을 적용한다.
 
-Run a focused configuration test that loads `application.yaml`, adds the
-property source to a `StandardEnvironment`, binds `spring.kafka` to
-`KafkaProperties`, and asserts the common, producer, and streams property maps.
+## 검증 방법
+
+focused configuration test에서 `application.yaml`을 load하고 `StandardEnvironment`에 property source를 추가한다. `spring.kafka`를 `KafkaProperties`로 bind한 뒤 common, producer, streams property map이 expected key를 포함하는지 assert한다.

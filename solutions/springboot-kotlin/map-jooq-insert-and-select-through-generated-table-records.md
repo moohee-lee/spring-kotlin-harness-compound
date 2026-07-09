@@ -1,25 +1,28 @@
 ---
-title: map jooq insert and select through generated table records
+title: jOOQ insert와 select mapping은 generated table record로 모은다
 tags: [springboot-kotlin, jooq, persistence]
 scope: cross-project
-status: draft
+status: active
+principles: [persistence-transactions]
 ---
 
-# map jooq insert and select through generated table records
+# jOOQ insert와 select mapping은 generated table record로 모은다
 
-## Context
+> 관련 공통 원칙: [영속성, 트랜잭션, 동시성 경계](../../principles/ko/persistence-transactions.md)
 
-Use this when a Spring Boot Kotlin persistence adapter uses jOOQ generated table records and maps between database rows and domain models.
+## 적용 시점
 
-## Wrong Direction
+Spring Boot Kotlin persistence adapter가 jOOQ generated table record를 사용하고, database row와 domain model 사이를 mapping할 때 적용한다.
 
-Scattering insert values with long `.set(TABLE.FIELD, value)` chains and accepting raw `org.jooq.Record` in mapper functions spreads table-column knowledge across query code. It also makes select and insert paths use different mapping shapes.
+## 피해야 할 방향
 
-## Correct Pattern
+insert value를 긴 `.set(TABLE.FIELD, value)` chain으로 흩뿌리고 mapper function이 raw `org.jooq.Record`를 받게 두면 table-column 지식이 query code 전반에 퍼진다. select와 insert path가 서로 다른 mapping shape를 쓰는 문제도 생긴다.
 
-Create adapter-local mapper functions between the domain model and the generated table record, for example `Domain.toRecord(): DomainRecord` and `DomainRecord.toEntity(): Domain`.
+## 권장 패턴
 
-For inserts, build the generated record first and pass it to jOOQ:
+adapter-local mapper function을 만들어 domain model과 generated table record 사이를 변환한다. 예를 들어 `Domain.toRecord(): DomainRecord`, `DomainRecord.toEntity(): Domain`을 둔다.
+
+insert에서는 generated record를 먼저 만들고 jOOQ에 넘긴다.
 
 ```kotlin
 dsl.insertInto(TABLE)
@@ -27,7 +30,7 @@ dsl.insertInto(TABLE)
     .execute()
 ```
 
-For select-like results, convert raw query results into the generated table record at the query boundary, then map to domain:
+select-like result는 query boundary에서 generated table record로 변환한 뒤 domain으로 mapping한다.
 
 ```kotlin
 dsl.fetch(sql, args)
@@ -35,16 +38,16 @@ dsl.fetch(sql, args)
     .map { it.toEntity() }
 ```
 
-Keep update queries field-based when they intentionally update only a subset of columns under guarded conditions.
+guarded condition 아래 일부 column만 update하는 update query는 의도적으로 field-based로 유지할 수 있다.
 
-## Reusable Insight
+## 공통 원칙
 
-Generated jOOQ records are the persistence adapter boundary type. Domain services should still see only domain models, but inside the adapter, using the generated record consistently keeps column mapping centralized and easier to review.
+Generated jOOQ record는 persistence adapter 내부 boundary type이다. domain service에는 domain model만 보여야 하지만 adapter 내부에서는 generated record를 일관되게 사용해야 column mapping이 한곳에 모이고 review하기 쉽다.
 
-## Detection
+## 점검 방법
 
-Look for persistence adapters with `import org.jooq.Record`, mapper functions that accept raw `Record`, or insert chains that repeat every table column. Those are signs that generated record mapping should be centralized.
+persistence adapter에서 `import org.jooq.Record`, raw `Record`를 받는 mapper function, 모든 table column을 반복하는 insert chain을 찾는다. 이런 신호가 있으면 generated record mapping을 중앙화할 대상이다.
 
-## Verification
+## 검증 방법
 
-Use normal persistence integration tests when Docker/Testcontainers or the target database is available. For review-driven refactors, a lightweight structural test can also assert that the adapter exposes a domain-to-generated-record mapper and no longer has private raw `Record` mapper entry points.
+Docker/Testcontainers나 target database를 사용할 수 있으면 일반 persistence integration test를 실행한다. review-driven refactor라면 lightweight structural test로 adapter가 domain-to-generated-record mapper를 노출하고 private raw `Record` mapper entry point를 더 이상 갖지 않는지 확인할 수도 있다.

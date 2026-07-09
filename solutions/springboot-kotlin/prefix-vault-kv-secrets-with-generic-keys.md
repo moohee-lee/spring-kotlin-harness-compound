@@ -1,34 +1,49 @@
 ---
-title: Prefix Vault KV secrets with generic keys
+title: Vault KV 비밀 값은 접두사로 네임스페이스를 만든다
 tags: [springboot-kotlin, vault, configuration, secrets]
 scope: cross-project
 status: active
+principles: [configuration-ownership]
 ---
 
-# Prefix Vault KV secrets with generic keys
+# Vault KV 비밀 값은 접두사로 네임스페이스를 만든다
 
-## Context
+> 관련 공통 원칙: [설정 소유권과 로딩 시점](../../principles/ko/configuration-ownership.md)
 
-Spring Boot services using Spring Cloud Vault ConfigData can import multiple KV paths as property sources. Some Vault stores use generic key names such as `USER` and `PASSWORD`, while application configuration often needs distinct names for database, Kafka, API signature, and other credentials.
+## 적용 시점
 
-## Wrong Direction
+Spring Cloud Vault ConfigData로 여러 KV path를 property source로 import하고, Vault 저장소가 `USER`, `PASSWORD` 같은 generic key name을 사용할 때 적용한다. application configuration은 database, Kafka, API signature 같은 credential을 구분해야 한다.
 
-Referencing generic Vault keys directly, such as `${USER}` or `${PASSWORD}`, makes configuration fragile. These names can collide with OS environment variables, local shell variables, or keys from another Vault path, causing Spring placeholder resolution to pick an unintended value.
+## 피해야 할 방향
 
-## Correct Pattern
+`${USER}`, `${PASSWORD}`처럼 generic Vault key를 직접 참조하면 안 된다. 이 이름들은 OS environment variable, local shell variable, 다른 Vault path의 key와 충돌할 수 있고 Spring placeholder resolution이 의도하지 않은 값을 선택할 수 있다.
 
-Import contextual Vault locations with explicit prefixes and the full Vault KV mount path, for example `vault://secret/database/path?prefix=db.` and `vault://secret/kafka/path?prefix=kafka.`. Reference the prefixed keys from application configuration, such as `${db.USER}`, `${db.PASSWORD}`, `${kafka.TRAFFIC_USERNAME}`, and `${kafka.TRAFFIC_PASSWORD}`.
+## 권장 패턴
 
-## Reusable Insight
+contextual Vault location을 명시적 prefix와 full Vault KV mount path로 import한다.
 
-When Vault key names are controlled by another team or already deployed, avoid forcing secret renames as the first move. Use ConfigData import prefixes to create application-local namespaces around each imported path, and keep YAML placeholders pointed at the prefixed property names.
+```yaml
+spring:
+  config:
+    import:
+      - vault://secret/database/path?prefix=db.
+      - vault://secret/kafka/path?prefix=kafka.
+```
 
-For explicit `spring.config.import` locations, do not rely on `spring.cloud.vault.kv.backend` to prefix the contextual path. Spring Cloud Vault reads the location path itself, including the KV mount. If the mount is `secret` and the secret path is `svc-dev/nfv-dev/postgresql`, import it as `vault://secret/svc-dev/nfv-dev/postgresql?prefix=db.`, not as `vault://nfv-dev/postgresql?prefix=db.` plus `spring.cloud.vault.kv.backend=secret`.
+application config에서는 `${db.USER}`, `${db.PASSWORD}`, `${kafka.TRAFFIC_USERNAME}`, `${kafka.TRAFFIC_PASSWORD}`처럼 prefixed key를 참조한다.
 
-## Detection
+Vault key name을 다른 팀이 관리하거나 이미 배포했다면 secret rename부터 요구하지 않는다. ConfigData import prefix로 application-local namespace를 만들고 YAML placeholder를 prefixed property name으로 유지한다.
 
-Look for placeholders using generic names, especially `${USER}`, `${PASSWORD}`, `${TOKEN}`, `${SECRET}`, or duplicated keys imported from multiple Vault contexts. Also check whether local startup could inherit a same-named environment variable. If a runtime log shows a literal placeholder such as `${db.USER}` reaching a datasource or client library, compare each `spring.config.import` location against the full Vault path including the mount name.
+명시적 `spring.config.import` location에서는 `spring.cloud.vault.kv.backend`가 contextual path 앞에 자동으로 붙는다고 가정하지 않는다. Spring Cloud Vault는 location path 자체를 읽는다. mount가 `secret`이고 secret path가 `svc-dev/nfv-dev/postgresql`라면 `vault://secret/svc-dev/nfv-dev/postgresql?prefix=db.`로 import해야 한다.
 
-## Verification
+## 공통 원칙
 
-Add configuration tests that load application YAML with representative Vault-prefixed property sources and assert the final bound configuration uses the expected values. For Kafka dotted client properties, bind `spring.kafka` through Spring Boot's `Binder` and verify the resulting `KafkaProperties` maps contain the expected JAAS strings.
+외부 secret store의 key name은 application property namespace와 다르다. import 시점에 namespace를 부여해 runtime binding이 어느 secret source에서 온 값인지 드러나게 해야 한다.
+
+## 점검 방법
+
+`${USER}`, `${PASSWORD}`, `${TOKEN}`, `${SECRET}` 같은 generic placeholder를 검색한다. 여러 Vault context가 같은 key를 import하는지도 확인한다. runtime log에 `${db.USER}` 같은 literal placeholder가 datasource나 client library까지 도달했다면 각 `spring.config.import` location이 mount name을 포함한 full Vault path와 일치하는지 비교한다.
+
+## 검증 방법
+
+대표 Vault-prefixed property source로 application YAML을 load하는 configuration test를 만들고 최종 bound configuration이 expected value를 쓰는지 assert한다. Kafka dotted client property는 Spring Boot `Binder`로 `spring.kafka`를 bind해 `KafkaProperties` map에 expected JAAS string이 들어가는지 확인한다.

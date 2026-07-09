@@ -1,36 +1,48 @@
 ---
-title: Keep Feign clients under reusable adapter base
+title: Feign client는 재사용 가능한 adapter base 아래에 둔다
 tags: [springboot-kotlin, feign, architecture, configuration]
 scope: cross-project
-status: draft
+status: active
+principles: [adapter-boundaries]
 ---
 
-# Keep Feign clients under reusable adapter base
+# Feign client는 재사용 가능한 adapter base 아래에 둔다
 
-## Context
+> 관련 공통 원칙: [어댑터 경계와 재사용 구조](../../principles/ko/adapter-boundaries.md)
 
-Spring Boot Kotlin services often start with one Feign client for one gateway, then add more clients over time. Early package and bean names tend to become the default pattern future contributors copy.
+## 적용 시점
 
-## Wrong Direction
+Spring Boot Kotlin service가 하나의 gateway용 Feign client로 시작했다가 시간이 지나며 client가 늘어날 수 있을 때 적용한다. 초기에 정한 package와 bean name은 이후 contributor가 복사하는 기본 pattern이 된다.
 
-Scanning only one client package such as `adapter.output.feign.identity`, or naming shared infrastructure `identityFeignCoroutineDispatcher`, makes future clients add duplicate scan annotations, duplicate dispatcher beans, or domain-specific configuration that is not actually domain-specific.
+## 피해야 할 방향
 
-## Correct Pattern
+`adapter.output.feign.identity`처럼 특정 client package만 scan하거나, shared infrastructure에 `identityFeignCoroutineDispatcher` 같은 domain-specific 이름을 붙이면 안 된다. 이후 다른 client가 추가될 때 scan annotation, dispatcher bean, 실제로는 generic한 configuration이 중복된다.
 
-Use a reusable base package such as `adapter.output.feign` for `@EnableFeignClients`. Keep that scan annotation on a shared Feign infrastructure configuration such as `FeignClientConfiguration`, not on the application class. Put clients under `adapter.output.feign.{domain}` and shared Feign infrastructure under `adapter.output.feign.config` or `adapter.output.feign.support`. Only create client-specific configuration when timeout, retry, pool, circuit breaker, or protocol policy genuinely differs.
+## 권장 패턴
 
-## Reusable Insight
+`@EnableFeignClients`는 `adapter.output.feign` 같은 reusable base package를 scan하게 한다. scan annotation은 application class가 아니라 `FeignClientConfiguration` 같은 shared Feign infrastructure configuration에 둔다. client는 `adapter.output.feign.{domain}` 아래에 두고, shared Feign infrastructure는 `adapter.output.feign.config` 또는 `adapter.output.feign.support` 아래에 둔다. timeout, retry, pool, circuit breaker, protocol policy가 실제로 다를 때만 client-specific configuration을 만든다.
 
-For signed Feign calls, keep a reusable opt-in configuration such as `SignatureFeignConfiguration` in the shared Feign config package. Do not register that configuration or its interceptor as a global `@Component`/`@Configuration`; attach it only from Feign clients that need signatures with `@FeignClient(configuration = [...])`.
+signed Feign call은 `SignatureFeignConfiguration` 같은 reusable opt-in configuration을 shared Feign config package에 둔다. 이 configuration이나 interceptor를 global `@Component`/`@Configuration`으로 등록하지 말고, signature가 필요한 Feign client에서만 `@FeignClient(configuration = [...])`로 붙인다.
 
-Avoid reflecting Feign interface annotations to reconstruct runtime URLs. `@FeignClient(url = "\${...}")` is a placeholder and the effective target is resolved during the Spring Cloud OpenFeign lifecycle. Derive the HTTP method and final target URL inside the interceptor from Feign's resolved `RequestTemplate`.
+Feign interface annotation을 reflection으로 읽어 runtime URL을 재구성하지 않는다. `@FeignClient(url = "\${...}")`는 placeholder이고 effective target은 Spring Cloud OpenFeign lifecycle에서 resolve된다. interceptor 안에서는 Feign이 resolve한 `RequestTemplate`에서 HTTP method와 final target URL을 얻는다.
 
-When a pure signing function already exists, keep the credential `ConfigurationProperties` near the signed HTTP adapter, for example as `SignatureSecretProperties` under the Feign config package. Inject it into the opt-in Feign configuration and call the pure function directly. Do not add a Spring service whose only behavior is copying properties into the same function; it creates another bean and another test surface without adding policy.
+pure signing function이 이미 있다면 credential `ConfigurationProperties`는 signed HTTP adapter 근처, 예를 들어 Feign config package의 `SignatureSecretProperties`로 둔다. opt-in Feign configuration에 주입해서 pure function을 직접 호출한다. property를 같은 function에 넘기기만 하는 Spring service는 policy를 추가하지 않으면서 bean과 test surface만 늘린다.
 
-## Detection
+## 공통 원칙
 
-Search for `@EnableFeignClients(basePackages = [` values that end at one domain package, Feign scan annotations left on the application class, bean names that include a gateway name for otherwise generic infrastructure, signed-client configurations duplicated under domain packages, signature interceptors registered with stereotype annotations, and services that only delegate configuration properties into a pure signer.
+client adapter infrastructure는 처음 등장한 domain 이름에 갇히지 않아야 한다. shared scan, dispatcher, signing support는 common adapter base에 두고, client-specific policy만 opt-in으로 분리한다.
 
-## Verification
+## 점검 방법
 
-Add focused tests that assert the shared Feign configuration scans the common Feign base package, the application class does not own Feign scanning, the adapter runs blocking Feign calls on the shared virtual-thread dispatcher, and signature interceptors are opt-in through the Feign client's `configuration` rather than global `@Component` beans. For signed clients, test that the interceptor derives method and URL from Feign's resolved `RequestTemplate`. Run detekt and the full test suite after package moves.
+다음을 검색한다.
+
+- 특정 domain package에서 끝나는 `@EnableFeignClients(basePackages = [...])`
+- application class에 남아 있는 Feign scan annotation
+- generic infrastructure인데 gateway 이름이 들어간 bean name
+- domain package마다 복제된 signed-client configuration
+- stereotype annotation으로 global 등록된 signature interceptor
+- property를 pure signer에 전달하기만 하는 service
+
+## 검증 방법
+
+shared Feign configuration이 common Feign base package를 scan하고 application class가 Feign scanning을 소유하지 않는지 focused test로 확인한다. blocking Feign call이 shared virtual-thread dispatcher에서 실행되는지, signature interceptor가 global `@Component`가 아니라 Feign client's `configuration`을 통해 opt-in되는지도 확인한다. signed client는 interceptor가 method와 URL을 Feign의 resolved `RequestTemplate`에서 얻는지 test한다. package move 뒤 detekt와 full test suite를 실행한다.

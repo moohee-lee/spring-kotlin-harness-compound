@@ -1,27 +1,26 @@
 ---
-title: Persist Kafka Streams GlobalKTable State Dir
+title: Kafka Streams GlobalKTable state.dir를 영속화한다
 tags: [springboot-kotlin, kafka-streams, globalktable, state-dir]
 scope: cross-project
 status: active
+principles: [kafka-streams-operations]
 ---
 
-# Persist Kafka Streams GlobalKTable State Dir
+# Kafka Streams GlobalKTable state.dir를 영속화한다
 
-## Context
-Spring Boot services using Kafka Streams `GlobalKTable` joins can appear to
-replay the full table topic on every restart when the Streams local state
-directory is under a temporary container path, gets cleaned on startup, or is not
-mounted as persistent storage. Kafka Streams already persists `GlobalKTable`
-state and checkpoint offsets locally when the `state.dir` survives restarts.
+> 관련 공통 원칙: [Kafka Streams 운영 계약](../../principles/ko/kafka-streams-operations.md)
 
-## Wrong Direction
-Do not add a separate application-managed disk cache or offset table before
-checking the Kafka Streams state directory. Duplicating state outside Kafka
-Streams risks offset/store inconsistency and adds recovery code that the Streams
-runtime already provides.
+## 적용 시점
 
-## Correct Pattern
-Configure a stable Kafka Streams state directory through Spring Boot:
+Kafka Streams `GlobalKTable` join을 사용하는 Spring Boot service가 재시작 때마다 table topic 전체를 replay하는 것처럼 보일 때 적용한다. 원인은 Streams local state directory가 temporary container path에 있거나, startup에 cleanup되거나, persistent storage로 mount되지 않는 경우가 많다. Kafka Streams는 `state.dir`가 재시작 사이에 살아 있으면 `GlobalKTable` state와 checkpoint offset을 local에 유지한다.
+
+## 피해야 할 방향
+
+Kafka Streams state directory를 확인하기 전에 별도의 application-managed disk cache나 offset table부터 만들면 안 된다. Kafka Streams 밖에 state를 중복 저장하면 offset/store 불일치 위험과 복구 code가 추가된다.
+
+## 권장 패턴
+
+Spring Boot 설정으로 안정적인 Kafka Streams state directory를 지정한다.
 
 ```yaml
 spring:
@@ -33,55 +32,29 @@ spring:
         on-shutdown: false
 ```
 
-Mount that path to a persistent volume in containerized environments. Keep
-`spring.kafka.streams.application-id` stable, because the application id is part
-of the local state path and changing it creates a fresh Streams application.
-Use `spring.kafka.streams.properties.auto.offset.reset: earliest` only as the
-cold-start fallback when no local checkpoint exists.
+container 환경에서는 해당 path를 persistent volume에 mount한다. `spring.kafka.streams.application-id`는 안정적으로 유지한다. application id는 local state path의 일부이므로 바뀌면 새 Streams application으로 취급된다. `spring.kafka.streams.properties.auto.offset.reset: earliest`는 local checkpoint가 없는 cold start fallback으로만 사용한다.
 
-When an application id must change, treat it as a new Kafka Streams application,
-not a rename. Prepare new group ACLs, expect a new state directory under
-`state.dir/<new-application-id>`, decide the starting offsets for every source
-topic before startup, and keep the old application stopped to avoid duplicate
-output. For topologies that combine a replayable `GlobalKTable` reference topic
-with a high-volume fact stream, keep the global consumer able to rebuild from
-the beginning while preventing unintended fact-stream replay unless a backfill is
-explicitly required.
+application id를 바꿔야 한다면 rename이 아니라 새 Kafka Streams application으로 다룬다. 새 group ACL을 준비하고, `state.dir/<new-application-id>` 아래 새 state directory가 생긴다고 예상하며, source topic별 시작 offset을 startup 전에 결정한다. replay 가능한 `GlobalKTable` reference topic과 고용량 fact stream을 함께 쓰는 topology라면 global consumer는 처음부터 rebuild할 수 있게 하되, fact stream replay는 명시적 backfill이 아닌 한 막아야 한다.
 
-When the container runs as a non-root UID, avoid mounting the persistent volume
-directly at the exact `state-dir` path. Kafka Streams sets POSIX permissions on
-`state.dir` during startup, and a PVC mount root is often owned by root even when
-`fsGroup` grants group write access. Prefer mounting the volume at a parent path
-and configuring `state-dir` as a child directory created by the application UID,
-or prepare the mounted directory with an init container that owns/chmods it.
+container가 non-root UID로 실행된다면 persistent volume을 정확히 `state-dir` path에 직접 mount하지 않는 편이 안전하다. Kafka Streams는 startup 중 `state.dir` permission을 설정하고, PVC mount root는 `fsGroup`이 group write를 주더라도 root 소유인 경우가 많다. volume은 parent path에 mount하고 application UID가 child directory를 만들게 하거나, init container로 ownership/chmod를 준비한다.
 
-## Reusable Insight
-For `GlobalKTable`, Kafka Streams stores replicated table state under
-`state.dir/<application-id>/global` and writes checkpoint offsets for recovery.
-On restart, a surviving checkpoint lets the global consumer seek from the stored
-offsets instead of rebuilding from the beginning. If the directory or checkpoint
-is missing, the global table must bootstrap from the source topic again.
+## 공통 원칙
 
-## Detection
-Look for profile or base YAML that lacks `spring.kafka.streams.state-dir`, uses
-the default `/tmp/kafka-streams`, or enables cleanup on startup/shutdown. In
-Kubernetes, inspect whether the configured path is backed by an `emptyDir` or
-image filesystem rather than a persistent volume. Also compare the Deployment
-`volumeMounts[].mountPath` with `spring.kafka.streams.state-dir`: if they are
-the same path and the pod runs as non-root, Kafka Streams can fail with
-`StateDirectory` permission errors while changing directory permissions.
-For migration work, flag any `application-id` change together with
-`auto.offset.reset=earliest`, because a new application id has no committed
-offsets and may replay retained source records into the output topic.
+`GlobalKTable`은 `state.dir/<application-id>/global` 아래 replicated table state를 저장하고 recovery용 checkpoint offset을 쓴다. 재시작 때 checkpoint가 살아 있으면 global consumer는 저장된 offset부터 seek한다. directory나 checkpoint가 없으면 source topic 처음부터 bootstrap해야 한다.
 
-## Verification
-Add configuration tests that bind `spring.kafka` and assert:
+## 점검 방법
 
-- `KafkaProperties.streams.stateDir` equals the configured path.
-- `KafkaProperties.streams.cleanup.onStartup` is `false`.
-- `KafkaProperties.streams.cleanup.onShutdown` is `false`.
-- `auto.offset.reset` remains configured for cold starts if required.
+profile 또는 base YAML에서 `spring.kafka.streams.state-dir`가 없거나 default `/tmp/kafka-streams`를 쓰거나 cleanup on startup/shutdown이 켜져 있는지 확인한다. Kubernetes에서는 configured path가 `emptyDir`나 image filesystem이 아니라 persistent volume인지 확인한다. Deployment `volumeMounts[].mountPath`와 `spring.kafka.streams.state-dir`가 같고 pod가 non-root로 실행되면 `StateDirectory` permission error가 날 수 있다.
 
-For runtime verification, start the app, let a `GlobalKTable` finish
-bootstrapping, shut down gracefully, and confirm the state directory contains
-the application id plus global store checkpoint files before restarting.
+migration 작업에서는 `application-id` 변경과 `auto.offset.reset=earliest`가 함께 있는지 특별히 확인한다. 새 application id는 committed offset이 없으므로 retained source record를 output topic으로 replay할 수 있다.
+
+## 검증 방법
+
+configuration test로 `spring.kafka`를 bind하고 다음을 assert한다.
+
+- `KafkaProperties.streams.stateDir`가 configured path와 같다.
+- `KafkaProperties.streams.cleanup.onStartup`이 `false`다.
+- `KafkaProperties.streams.cleanup.onShutdown`이 `false`다.
+- cold start가 필요하다면 `auto.offset.reset` 설정이 의도대로 남아 있다.
+
+runtime 검증에서는 app을 시작해 `GlobalKTable` bootstrap이 끝나게 하고, graceful shutdown 후 state directory에 application id와 global store checkpoint file이 있는지 확인한 다음 재시작한다.

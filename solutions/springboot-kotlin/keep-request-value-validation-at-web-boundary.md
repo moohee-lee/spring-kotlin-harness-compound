@@ -1,34 +1,37 @@
 ---
-title: keep request value validation at web boundary
+title: Request 값 검증은 web boundary에 둔다
 tags: [springboot-kotlin, validation, hexagonal-architecture]
 scope: cross-project
-status: draft
+status: active
+principles: [adapter-boundaries]
 ---
 
-# keep request value validation at web boundary
+# Request 값 검증은 web boundary에 둔다
 
-## Context
+> 관련 공통 원칙: [어댑터 경계와 재사용 구조](../../principles/ko/adapter-boundaries.md)
 
-Use this when a Spring Boot Kotlin service follows hexagonal architecture and an inbound WebFlux handler binds request bodies, path variables, or query parameters into request DTOs before calling an application service.
+## 적용 시점
 
-## Wrong Direction
+Spring Boot Kotlin service가 hexagonal architecture를 따르고, inbound WebFlux handler가 request body, path variable, query parameter를 request DTO로 bind한 뒤 application service를 호출할 때 적용한다.
 
-Duplicating basic request value validation in the application service with Kotlin `require` looks harmless, but it moves transport input concerns into the use case and leaks `IllegalArgumentException` for client-input failures. Examples include checking that request DTO numbers are positive after the handler already validated `@Min(1)`.
+## 피해야 할 방향
 
-## Correct Pattern
+handler에서 이미 `@Min(1)` 같은 annotation으로 검증한 request DTO 숫자 양수 여부를 application service에서 Kotlin `require`로 다시 검사하면 안 된다. 겉보기에는 안전해 보이지만 transport input concern이 use case로 이동하고 client-input failure에 `IllegalArgumentException`이 새어 나간다.
 
-Let the inbound adapter validate request value shape and primitive constraints before creating the command. Convert those failures into the project's request validation exception shape, including field source (`BODY`, `QUERY`, `PATH`, or `HEADER`) and field errors.
+## 권장 패턴
 
-Keep the application service focused on use-case policy: whether the already-normalized command is allowed for that service operation, state transition, tenant, feature flag, or domain rule. Use domain/application exceptions for those failures, not transport validation exceptions.
+inbound adapter가 request value shape와 primitive constraint를 검증한 뒤 command를 만든다. 실패는 project의 request validation exception shape로 변환하고, field source(`BODY`, `QUERY`, `PATH`, `HEADER`)와 field error를 포함한다.
 
-## Reusable Insight
+application service는 이미 normalize된 command가 현재 service operation, state transition, tenant, feature flag, domain rule에서 허용되는지 같은 use-case policy에 집중한다. 이 실패에는 transport validation exception이 아니라 domain/application exception을 사용한다.
 
-The same numeric or string constraint can look like a service invariant, but if it is about whether the HTTP request value is syntactically valid, it belongs at the adapter boundary. If it is about whether the service operation permits that valid value in the current business context, it belongs in the service/domain layer.
+## 공통 원칙
 
-## Detection
+같은 numeric/string constraint라도 HTTP request value가 syntactically valid한지에 관한 것이라면 adapter boundary에 속한다. valid value가 현재 business context에서 허용되는지에 관한 것이라면 service/domain layer에 속한다.
 
-Review service methods for `require`, `check`, or `IllegalArgumentException` around request DTO constraints that are already expressed as Bean Validation annotations on inbound request classes. Also check common validation helpers: they should emit the project's request validation exception rather than raw Bean Validation exceptions when used by handlers.
+## 점검 방법
 
-## Verification
+service method에서 inbound request class의 Bean Validation annotation으로 이미 표현된 constraint를 `require`, `check`, `IllegalArgumentException`으로 반복하는지 확인한다. common validation helper가 있다면 handler가 사용할 때 raw Bean Validation exception이 아니라 project의 request validation exception을 내보내는지도 확인한다.
 
-Add one handler/router test showing invalid request values return a 400 validation response before the use case is called. Add one application service test or code review assertion showing the service does not repeat the primitive request-value checks. Add a common validation helper test if the project has a custom `awaitBodyValidated` or query binding helper.
+## 검증 방법
+
+invalid request value가 use case 호출 전에 400 validation response로 반환되는 handler/router test를 하나 둔다. application service가 primitive request-value check를 반복하지 않는다는 service test나 code review assertion도 둔다. project에 `awaitBodyValidated`나 query binding helper가 있다면 common validation helper test를 추가한다.

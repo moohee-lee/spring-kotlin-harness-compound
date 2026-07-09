@@ -1,28 +1,32 @@
 ---
-title: Avoid build-time env merging in Dockerfiles
+title: Dockerfile에서 build-time ENV merge를 하지 않는다
 tags: [springboot-kotlin, docker, jvm-options]
 scope: cross-project
-status: draft
+status: active
+principles: [runtime-boundaries, build-tooling]
 ---
 
-# Avoid build-time env merging in Dockerfiles
+# Dockerfile에서 build-time ENV merge를 하지 않는다
 
-## Context
-Spring Boot JVM services often accept runtime tuning through environment
-variables such as `JAVA_OPTS`, `JAVA_OPTIONS`, and `JVM_OPTIONS` in a
-Dockerfile entrypoint.
+> 관련 공통 원칙: [런타임 경계와 컨테이너 계약](../../principles/ko/runtime-boundaries.md), [빌드와 도구 체인은 런타임을 오염시키지 않는다](../../principles/ko/build-tooling.md)
 
-## Wrong Direction
-Do not try to merge runtime environment variables with a Dockerfile `ENV`
-instruction such as `ENV JAVA_OPTIONS="${JAVA_OPTS} ${JAVA_OPTIONS}"`.
-Docker evaluates that expression at build time, so variables supplied later
-with `docker run -e` or Kubernetes env settings are not merged there. Docker's
-static checker also reports `UndefinedVar` for variables that are not already
-defined in the Dockerfile.
+## 적용 시점
 
-## Correct Pattern
-Set only stable image defaults with `ENV`, then expand runtime variables in
-the shell-form entrypoint:
+Spring Boot JVM service가 Dockerfile entrypoint에서 `JAVA_OPTS`, `JAVA_OPTIONS`, `JVM_OPTIONS` 같은 runtime 환경 변수를 받아 JVM option을 조합할 때 적용한다.
+
+## 피해야 할 방향
+
+Dockerfile `ENV`에서 runtime 환경 변수를 merge하려고 하면 안 된다.
+
+```Dockerfile
+ENV JAVA_OPTIONS="${JAVA_OPTS} ${JAVA_OPTIONS}"
+```
+
+Docker는 이 표현을 image build time에 평가한다. 나중에 `docker run -e`나 Kubernetes env로 들어오는 값은 여기서 merge되지 않는다. Docker static checker도 Dockerfile 안에서 미리 정의되지 않은 변수에 대해 `UndefinedVar`를 보고한다.
+
+## 권장 패턴
+
+`ENV`에는 안정적인 image default만 두고, runtime 변수 조합은 shell-form entrypoint에서 수행한다.
 
 ```Dockerfile
 ENV JAVA_OPTIONS=""
@@ -31,26 +35,20 @@ ENV JVM_OPTIONS="-XshowSettings:vm -XX:MaxRAMPercentage=60.0 -XX:+UseG1GC"
 ENTRYPOINT ["sh","-c","exec java $JAVA_OPTS $JAVA_OPTIONS $JVM_OPTIONS -jar app.jar"]
 ```
 
-This lets container runtime configuration override `JVM_OPTIONS` and supply
-`JAVA_OPTS` or `JAVA_OPTIONS` without relying on build-time interpolation.
+이 방식은 container runtime이 `JVM_OPTIONS`를 override하거나 `JAVA_OPTS`, `JAVA_OPTIONS`를 공급해도 build-time interpolation에 의존하지 않는다.
 
-## Reusable Insight
-Dockerfile `ENV` is image build metadata, not a runtime expression engine.
-Runtime JVM flags should be combined where the runtime shell expands them.
+## 공통 원칙
 
-## Detection
-Run Docker's static Dockerfile check and look for `UndefinedVar` warnings on
-`ENV` instructions that reference `JAVA_OPTS`, `JAVA_OPTIONS`, or similar
-runtime-only variables.
+Dockerfile `ENV`는 image build metadata이지 runtime expression engine이 아니다. runtime JVM flag 조합은 runtime shell이 변수를 확장하는 지점에서 수행해야 한다.
 
-## Verification
-Use:
+## 점검 방법
+
+Dockerfile static check를 실행하고 `ENV` instruction이 `JAVA_OPTS`, `JAVA_OPTIONS` 같은 runtime-only 변수를 참조하면서 `UndefinedVar` warning을 내는지 확인한다.
+
+## 검증 방법
 
 ```bash
 docker buildx build --check .
 ```
 
-For local Apple Silicon machines using amd64-only corporate base images, an
-unrelated `InvalidBaseImagePlatform` warning may remain unless the builder is
-configured for the deployment platform. Confirm no `UndefinedVar` warning
-remains for the JVM option handling.
+Apple Silicon local machine에서 amd64-only base image를 쓰면 builder platform 설정에 따라 별도의 `InvalidBaseImagePlatform` warning이 남을 수 있다. 이 경우에도 JVM option 처리에 대한 `UndefinedVar` warning은 없어야 한다.
