@@ -39,6 +39,15 @@ of the local state path and changing it creates a fresh Streams application.
 Use `spring.kafka.streams.properties.auto.offset.reset: earliest` only as the
 cold-start fallback when no local checkpoint exists.
 
+When an application id must change, treat it as a new Kafka Streams application,
+not a rename. Prepare new group ACLs, expect a new state directory under
+`state.dir/<new-application-id>`, decide the starting offsets for every source
+topic before startup, and keep the old application stopped to avoid duplicate
+output. For topologies that combine a replayable `GlobalKTable` reference topic
+with a high-volume fact stream, keep the global consumer able to rebuild from
+the beginning while preventing unintended fact-stream replay unless a backfill is
+explicitly required.
+
 When the container runs as a non-root UID, avoid mounting the persistent volume
 directly at the exact `state-dir` path. Kafka Streams sets POSIX permissions on
 `state.dir` during startup, and a PVC mount root is often owned by root even when
@@ -61,6 +70,9 @@ image filesystem rather than a persistent volume. Also compare the Deployment
 `volumeMounts[].mountPath` with `spring.kafka.streams.state-dir`: if they are
 the same path and the pod runs as non-root, Kafka Streams can fail with
 `StateDirectory` permission errors while changing directory permissions.
+For migration work, flag any `application-id` change together with
+`auto.offset.reset=earliest`, because a new application id has no committed
+offsets and may replay retained source records into the output topic.
 
 ## Verification
 Add configuration tests that bind `spring.kafka` and assert:
